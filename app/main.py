@@ -1,6 +1,7 @@
 import os
 import uuid
 import datetime
+import tempfile
 from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, Form, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -240,14 +241,12 @@ async def upload_document(
 
     doc_id = str(uuid.uuid4())
     file_ext = file.filename.split(".")[-1].lower() if "." in file.filename else "txt"
-    storage_filename = f"{doc_id}.{file_ext}"
-    storage_path = os.path.join(UPLOAD_DIR, storage_filename)
-
-    # Save file on local disk
+    # Save file to a temporary file
     try:
-        with open(storage_path, "wb") as f:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=f".{file_ext}") as tmp:
             content = await file.read()
-            f.write(content)
+            tmp.write(content)
+            storage_path = tmp.name
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to save file: {e}")
 
@@ -258,7 +257,7 @@ async def upload_document(
         file_name=file.filename,
         file_type=file_ext,
         source_type=source_type,
-        storage_url=storage_path,
+        storage_url=f"temp://{file.filename}",
         parsed_status="Parsing"
     )
     db.add(db_doc)
@@ -293,6 +292,12 @@ async def upload_document(
         db.commit()
         print(f"Error parsing document: {e}")
         raise HTTPException(status_code=500, detail=f"Parsing error: {e}")
+    finally:
+        if 'storage_path' in locals() and os.path.exists(storage_path):
+            try:
+                os.remove(storage_path)
+            except Exception as e:
+                print(f"Error deleting temporary file: {e}")
 
     # Audit log
     audit = AuditLog(
@@ -327,14 +332,13 @@ async def upload_documents_batch(
     for file in files:
         doc_id = str(uuid.uuid4())
         file_ext = file.filename.split(".")[-1].lower() if "." in file.filename else "txt"
-        storage_filename = f"{doc_id}.{file_ext}"
-        storage_path = os.path.join(UPLOAD_DIR, storage_filename)
 
-        # Save file on local disk
+        # Save file to a temporary file
         try:
-            with open(storage_path, "wb") as f:
+            with tempfile.NamedTemporaryFile(delete=False, suffix=f".{file_ext}") as tmp:
                 content = await file.read()
-                f.write(content)
+                tmp.write(content)
+                storage_path = tmp.name
         except Exception as e:
             print(f"Failed to save file {file.filename}: {e}")
             continue
@@ -346,7 +350,7 @@ async def upload_documents_batch(
             file_name=file.filename,
             file_type=file_ext,
             source_type=source_type,
-            storage_url=storage_path,
+            storage_url=f"temp://{file.filename}",
             parsed_status="Parsing"
         )
         db.add(db_doc)
@@ -381,6 +385,12 @@ async def upload_documents_batch(
             db.commit()
             print(f"Error parsing document {file.filename}: {e}")
             uploaded_docs.append({"id": doc_id, "file_name": file.filename, "status": "Failed", "error": str(e)})
+        finally:
+            if 'storage_path' in locals() and os.path.exists(storage_path):
+                try:
+                    os.remove(storage_path)
+                except Exception as e:
+                    print(f"Error deleting temporary file: {e}")
 
         # Audit log
         audit = AuditLog(
