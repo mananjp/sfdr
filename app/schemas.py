@@ -117,6 +117,11 @@ class RegulationFieldBase(BaseModel):
     mandatory: bool = True
     guidance: Optional[Dict[str, Any]] = None
     regulation_version: str = "2022/1288"
+    # Legal consequence metadata
+    legal_basis: Optional[str] = None
+    penalty_tier: str = "Medium"
+    enforcement_body: Optional[str] = None
+    cross_references: Optional[List[Dict[str, Any]]] = None
 
 class RegulationField(RegulationFieldBase):
     id: str
@@ -188,9 +193,26 @@ class ValidationResult(BaseModel):
     details: Optional[Dict[str, Any]] = None
     created_at: datetime
     updated_at: datetime
+    # Legal consequence fields
+    regulation_ref: Optional[str] = None
+    legal_consequence: Optional[str] = None
+    penalty_range: Optional[str] = None
+    remediation: Optional[str] = None
+    escalation_required: bool = False
 
     class Config:
         from_attributes = True
+
+# --- Legal Consequence Detail (embedded in MatrixItem) ---
+class LegalConsequenceDetail(BaseModel):
+    rule_name: str
+    severity: str
+    message: str
+    regulation_ref: Optional[str] = None
+    legal_consequence: Optional[str] = None
+    penalty_range: Optional[str] = None
+    remediation: Optional[str] = None
+    escalation_required: bool = False
 
 # --- UI Helper Matrix Schema ---
 class MatrixItem(BaseModel):
@@ -203,6 +225,13 @@ class MatrixItem(BaseModel):
     description: Optional[str]
     expected_unit: Optional[str]
     regulation_version: str = "2022/1288"
+    framework: str = "SFDR"
+    
+    # Legal consequence metadata
+    legal_basis: Optional[str] = None
+    penalty_tier: str = "Medium"
+    enforcement_body: Optional[str] = None
+    cross_references: Optional[List[Dict[str, Any]]] = None
     
     # Answers & Evidence (Optional if not run yet)
     answer_id: Optional[str] = None
@@ -220,6 +249,42 @@ class MatrixItem(BaseModel):
     
     validation_passed: bool = True
     validation_errors: List[str] = []
+    # Enriched legal consequence data from validation results
+    legal_consequences: List[LegalConsequenceDetail] = []
+
+
+# --- What-If Scenario Schemas ---
+class WhatIfScenarioCreate(BaseModel):
+    scenario_name: str
+    scenario_description: Optional[str] = None
+    parameters: Dict[str, Any]  # e.g., {"action": "remove_field", "field_code": "PAI_GHG_SCOPE3"}
+
+class WhatIfScenarioResponse(BaseModel):
+    id: str
+    project_id: str
+    scenario_name: str
+    scenario_description: Optional[str] = None
+    parameters: Optional[Dict[str, Any]] = None
+    triggered_obligations: Optional[List[Dict[str, Any]]] = None
+    legal_consequences: Optional[List[Dict[str, Any]]] = None
+    risk_score: float = 0.0
+    created_at: datetime
+    created_by: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+# --- Legal Summary Schema ---
+class LegalRiskSummary(BaseModel):
+    total_fields: int
+    critical_gaps: int
+    high_risk_fields: int
+    medium_risk_fields: int
+    low_risk_fields: int
+    total_risk_score: float
+    escalation_count: int
+    top_obligations: List[Dict[str, Any]]
+    framework_coverage: Dict[str, Dict[str, int]]  # e.g., {"SFDR": {"total": 12, "compliant": 8}, ...}
 
 
 # --- Audit Log Schema ---

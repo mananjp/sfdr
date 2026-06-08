@@ -35,6 +35,9 @@ def run_e2e_verification():
     try:
         # 2. Seed default regulations and entities
         print("[Step 2] Seeding standard SFDR framework fields...")
+        system_user = User(id="system", username="system", email="system@veritas.com", role="Administrator")
+        db.add(system_user)
+        
         org = Organization(id="verify_org", name="Veritas Sustainable Asset Management Ltd", type="Asset Manager")
         db.add(org)
         
@@ -59,7 +62,11 @@ def run_e2e_verification():
                 field_kind=f["field_kind"],
                 mandatory=f["mandatory"],
                 guidance=f["guidance"],
-                regulation_version=f.get("regulation_version", "2022/1288")
+                regulation_version=f.get("regulation_version", "2022/1288"),
+                legal_basis=f.get("legal_basis"),
+                penalty_tier=f.get("penalty_tier", "Medium"),
+                enforcement_body=f.get("enforcement_body"),
+                cross_references=f.get("cross_references")
             )
             db.add(field)
         db.commit()

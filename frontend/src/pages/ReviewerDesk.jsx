@@ -194,6 +194,49 @@ const ReviewerDesk = () => {
         <div className="w-full lg:w-2/3 flex flex-col gap-6">
           {selectedItem ? (
             <>
+              {/* Field Metadata and Legal Info */}
+              <div className="glass-card p-6 flex flex-col gap-4">
+                <h2 className="font-bold text-lg text-slate-800 line-clamp-2">{selectedItem.field_label}</h2>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
+                  <div className="bg-slate-50 rounded-lg px-3 py-2">
+                    <div className="font-bold text-slate-400 uppercase tracking-wider text-[10px]">Framework & Code</div>
+                    <div className="font-mono text-slate-700 mt-0.5">{selectedItem.framework || 'SFDR'} ({selectedItem.field_code})</div>
+                  </div>
+                  <div className="bg-slate-50 rounded-lg px-3 py-2">
+                    <div className="font-bold text-slate-400 uppercase tracking-wider text-[10px]">Legal Basis</div>
+                    <div className="font-bold text-slate-700 mt-0.5">{selectedItem.legal_basis || 'SFDR RTS'}</div>
+                  </div>
+                  <div className="bg-slate-50 rounded-lg px-3 py-2">
+                    <div className="font-bold text-slate-400 uppercase tracking-wider text-[10px]">Enforcement Body</div>
+                    <div className="font-bold text-slate-700 mt-0.5">{selectedItem.enforcement_body || 'NCA / ESMA'}</div>
+                  </div>
+                  <div className="bg-slate-50 rounded-lg px-3 py-2 flex flex-col justify-center">
+                    <div className="font-bold text-slate-400 uppercase tracking-wider text-[10px] mb-0.5">Penalty Tier</div>
+                    <span className={`inline-block font-extrabold text-[10px] w-fit px-2 py-0.5 rounded border ${
+                      selectedItem.penalty_tier === 'Critical' ? 'bg-red-50 text-red-700 border-red-200' :
+                      selectedItem.penalty_tier === 'High' ? 'bg-orange-50 text-orange-700 border-orange-200' :
+                      selectedItem.penalty_tier === 'Medium' ? 'bg-amber-50 text-amber-700 border-amber-200' :
+                      'bg-emerald-50 text-emerald-700 border-emerald-200'
+                    }`}>
+                      {selectedItem.penalty_tier || 'Medium'}
+                    </span>
+                  </div>
+                </div>
+
+                {selectedItem.cross_references && selectedItem.cross_references.length > 0 && (
+                  <div className="flex flex-col gap-1.5 pt-2 border-t border-slate-100">
+                    <div className="font-bold text-slate-400 uppercase tracking-wider text-[10px]">Cross-Framework Equivalents</div>
+                    <div className="flex flex-wrap gap-2">
+                      {selectedItem.cross_references.map((ref, idx) => (
+                        <span key={idx} className="inline-flex items-center gap-1.5 text-xs font-bold bg-indigo-50 text-indigo-700 rounded-lg px-2.5 py-1 border border-indigo-100">
+                          🔗 {ref.framework}: {ref.field_code} ({ref.relationship})
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+
               {/* Evidence Panel */}
               <div className="glass-card p-6 border-l-4 border-l-indigo-500">
                 <div className="flex justify-between items-start mb-4">
@@ -235,18 +278,35 @@ const ReviewerDesk = () => {
                   placeholder="Review the AI-generated draft here..."
                 ></textarea>
 
-                {/* Validation Alerts */}
-                {!selectedItem.validation_passed && selectedItem.validation_errors?.length > 0 && (
-                  <div className="mt-4 p-4 bg-rose-50 border border-rose-100 rounded-xl flex items-start gap-3">
-                    <AlertTriangle size={20} className="text-rose-500 shrink-0 mt-0.5" />
-                    <div>
-                      <h4 className="font-bold text-rose-800 text-sm">Validation Issues Found</h4>
-                      <ul className="mt-1 text-sm text-rose-600 font-medium list-disc pl-4">
-                        {selectedItem.validation_errors.map((err, i) => (
-                          <li key={i}>{err}</li>
-                        ))}
-                      </ul>
-                    </div>
+                {/* Enriched Validation Legal Consequences & Remediation Alerts */}
+                {selectedItem.legal_consequences && selectedItem.legal_consequences.length > 0 && (
+                  <div className="mt-4 space-y-3">
+                    {selectedItem.legal_consequences.map((conseq, idx) => (
+                      <div key={idx} className={`p-4 border rounded-xl flex items-start gap-3 ${
+                        conseq.severity === 'Error' ? 'bg-red-50/70 border-red-100' : 'bg-orange-50/70 border-orange-100'
+                      }`}>
+                        <AlertTriangle size={20} className={conseq.severity === 'Error' ? 'text-red-500 shrink-0 mt-0.5' : 'text-orange-500 shrink-0 mt-0.5'} />
+                        <div className="flex-1 min-w-0">
+                          <div className="flex justify-between items-center flex-wrap gap-2">
+                            <span className={`font-bold text-sm ${conseq.severity === 'Error' ? 'text-red-900' : 'text-orange-900'}`}>{conseq.message}</span>
+                            {conseq.escalation_required && (
+                              <span className="bg-red-600 text-white font-extrabold text-[9px] px-2 py-0.5 rounded tracking-wide uppercase">
+                                Escalation Required
+                              </span>
+                            )}
+                          </div>
+                          <div className="mt-2 text-xs font-medium text-slate-500 flex flex-col gap-1">
+                            <div><strong>Regulation Article:</strong> {conseq.regulation_ref}</div>
+                            <div><strong>Legal Consequence:</strong> {conseq.legal_consequence}</div>
+                            <div><strong>Potential Fines:</strong> {conseq.penalty_range}</div>
+                            <div className="mt-2 p-3 bg-white border border-slate-100 rounded-lg font-mono text-[11px] leading-relaxed text-slate-600">
+                              <strong className="text-slate-800">Remediation Playbook:</strong>
+                              <div className="mt-1 whitespace-pre-wrap">{conseq.remediation}</div>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
                   </div>
                 )}
 

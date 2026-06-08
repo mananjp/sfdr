@@ -15,12 +15,14 @@ from app.database import get_db, Base, engine
 from app.models import (
     Organization, Product, ReportingProject, Document, DocumentChunk,
     RegulationField, FieldEvidence, FieldAnswer, ValidationResult, AuditLog, User,
-    ProjectStatus, AnswerStatus
+    WhatIfScenario, ProjectStatus, AnswerStatus
 )
 from app.schemas import (
     ReportingProjectCreate, ReportingProject as RPResponse,
     Product as ProductResponse, MatrixItem, FieldAnswerUpdate,
-    UserCreate, User as UserResponse, AuditLogResponse, Token
+    UserCreate, User as UserResponse, AuditLogResponse, Token,
+    RegulationField as RegFieldResponse, LegalConsequenceDetail,
+    WhatIfScenarioCreate, WhatIfScenarioResponse, LegalRiskSummary
 )
 from app.auth import (
     get_password_hash, verify_password, create_access_token, 
@@ -32,14 +34,15 @@ from app.services.retrieval import RetrievalService
 from app.services.generation import GenerationService
 from app.services.validation import ValidationService
 from app.services.export import ExportService
+from app.services.what_if_engine import WhatIfEngine
 
 # Initialize database tables on startup
 Base.metadata.create_all(bind=engine)
 
 app = FastAPI(
-    title="SFDR Compliance Workspace API",
-    description="GenAI-powered compliance workspace for SFDR RTS entity PAI and periodic reporting.",
-    version="1.0.0"
+    title="Regulatory Intelligence & Compliance Workflow Engine API",
+    description="GenAI-powered compliance workspace with legal consequence mapping across SFDR, CSRD, and multi-framework regulatory obligations.",
+    version="2.0.0"
 )
 
 @app.on_event("startup")
@@ -189,8 +192,11 @@ def create_project(project_in: ReportingProjectCreate, db: Session = Depends(get
     
     db.add(db_project)
     
-    # Create empty baseline answers for all mapped regulation fields
-    fields = db.query(RegulationField).filter(RegulationField.disclosure_type == project_in.disclosure_type).all()
+    # Create empty baseline answers for all mapped regulation fields (SFDR only for project creation)
+    fields = db.query(RegulationField).filter(
+        RegulationField.disclosure_type == project_in.disclosure_type,
+        RegulationField.framework == "SFDR"
+    ).all()
     for field in fields:
         baseline_answer = FieldAnswer(
             id=str(uuid.uuid4()),
@@ -426,14 +432,19 @@ def get_project_documents(project_id: str, db: Session = Depends(get_db), curren
 @app.get("/api/projects/{project_id}/matrix", response_model=List[MatrixItem])
 def get_project_compliance_matrix(project_id: str, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     """
-    Unified compliance requirement matrix, combining regulation fields,
-    answers, citations, and active validation flags.
+    Unified compliance requirement matrix with legal consequence metadata,
+    combining regulation fields, answers, citations, validation flags, and
+    legal risk data from enriched regulation fields.
     """
     project = db.query(ReportingProject).filter(ReportingProject.id == project_id).first()
     if not project:
         raise HTTPException(status_code=404, detail="Project not found.")
 
-    fields = db.query(RegulationField).filter(RegulationField.disclosure_type == project.disclosure_type).all()
+    # Get SFDR fields for this project's disclosure type
+    fields = db.query(RegulationField).filter(
+        RegulationField.disclosure_type == project.disclosure_type,
+        RegulationField.framework == "SFDR"
+    ).all()
     matrix = []
 
     for field in fields:
@@ -450,7 +461,7 @@ def get_project_compliance_matrix(project_id: str, db: Session = Depends(get_db)
             FieldEvidence.regulation_field_id == field.id
         ).order_by(FieldEvidence.confidence.desc()).first()
 
-        # Fetch validation errors
+        # Fetch validation errors with legal consequence data
         validations = db.query(ValidationResult).filter(
             ValidationResult.project_id == project_id,
             ValidationResult.regulation_field_id == field.id
@@ -458,6 +469,21 @@ def get_project_compliance_matrix(project_id: str, db: Session = Depends(get_db)
 
         validation_passed = all(v.passed for v in validations)
         validation_errors = [v.details.get("message", "") for v in validations if not v.passed]
+        
+        # Build enriched legal consequence details
+        legal_consequences = []
+        for v in validations:
+            if not v.passed:
+                legal_consequences.append({
+                    "rule_name": v.rule_name,
+                    "severity": v.severity,
+                    "message": v.details.get("message", "") if v.details else "",
+                    "regulation_ref": v.regulation_ref,
+                    "legal_consequence": v.legal_consequence,
+                    "penalty_range": v.penalty_range,
+                    "remediation": v.remediation,
+                    "escalation_required": v.escalation_required
+                })
 
         # Gather source location
         page_no = None
@@ -488,9 +514,16 @@ def get_project_compliance_matrix(project_id: str, db: Session = Depends(get_db)
             "field_kind": field.field_kind,
             "mandatory": field.mandatory,
             "annex_code": field.annex_code,
-            "description": field.guidance.get("description", ""),
-            "expected_unit": field.guidance.get("unit"),
+            "description": field.guidance.get("description", "") if field.guidance else "",
+            "expected_unit": field.guidance.get("unit") if field.guidance else None,
             "regulation_version": field.regulation_version,
+            "framework": field.framework,
+            
+            # Legal consequence metadata from field
+            "legal_basis": field.legal_basis,
+            "penalty_tier": field.penalty_tier or "Medium",
+            "enforcement_body": field.enforcement_body,
+            "cross_references": field.cross_references or [],
             
             "answer_id": answer.id if answer else None,
             "answer_text": answer.answer_text if answer else None,
@@ -506,7 +539,8 @@ def get_project_compliance_matrix(project_id: str, db: Session = Depends(get_db)
             "source_file": source_file,
             
             "validation_passed": validation_passed,
-            "validation_errors": validation_errors
+            "validation_errors": validation_errors,
+            "legal_consequences": legal_consequences
         })
         
     return matrix
@@ -547,12 +581,15 @@ def process_rag_and_drafting(project_id: str, db: Session = Depends(get_db), cur
     project.status = ProjectStatus.VALIDATING.value
     db.commit()
 
-    # 2. Iterate through fields and extract
-    fields = db.query(RegulationField).filter(RegulationField.disclosure_type == project.disclosure_type).all()
+    # 2. Iterate through SFDR fields and extract
+    fields = db.query(RegulationField).filter(
+        RegulationField.disclosure_type == project.disclosure_type,
+        RegulationField.framework == "SFDR"
+    ).all()
     
     for field in fields:
         # Search chunks for field keywords
-        query = f"{field.field_label} {field.guidance.get('description', '')}"
+        query = f"{field.field_label} {field.guidance.get('description', '') if field.guidance else ''}"
         matching_chunks = RetrievalService.search(query, chunk_dicts, top_k=5)
         
         # Call Groq/Simulator evidence extraction
@@ -568,40 +605,44 @@ def process_rag_and_drafting(project_id: str, db: Session = Depends(get_db), cur
         if matching_chunks:
             top_match_chunk_id = matching_chunks[0]["id"]
 
-        # Save extracted evidence using SQLite native ON CONFLICT DO UPDATE
+        # Save extracted evidence — use upsert pattern for PostgreSQL
         source_locator = {
             "quote": evidence_res.get("evidence_quote"),
             "file": documents[0].file_name if documents else "Primary Report",
             "page": matching_chunks[0]["page_no"] if matching_chunks else 1
         }
-        
-        stmt = insert(FieldEvidence).values(
-            id=str(uuid.uuid4()),
-            project_id=project_id,
-            regulation_field_id=field.id,
-            document_chunk_id=top_match_chunk_id,
-            source_locator=source_locator,
-            extracted_value=evidence_res.get("extracted_value"),
-            confidence=evidence_res.get("confidence", 0.0),
-            extraction_method="groq_llama3" if GROQ_API_KEY else "simulation_engine",
-            regulation_version=field.regulation_version,
-            prompt_version="v1.0",
-            model_parameters={"temperature": 0.0, "response_format": "json_object"}
-        )
-        
-        stmt = stmt.on_conflict_do_update(
-            index_elements=["project_id", "regulation_field_id", "document_chunk_id", "extraction_method"],
-            set_={
-                "source_locator": stmt.excluded.source_locator,
-                "extracted_value": stmt.excluded.extracted_value,
-                "confidence": stmt.excluded.confidence,
-                "regulation_version": stmt.excluded.regulation_version,
-                "prompt_version": stmt.excluded.prompt_version,
-                "model_parameters": stmt.excluded.model_parameters,
-                "updated_at": datetime.datetime.utcnow()
-            }
-        )
-        db.execute(stmt)
+
+        # Check for existing evidence and update, or create new
+        existing_evidence = db.query(FieldEvidence).filter(
+            FieldEvidence.project_id == project_id,
+            FieldEvidence.regulation_field_id == field.id,
+            FieldEvidence.extraction_method == ("groq_llama3" if GROQ_API_KEY else "simulation_engine")
+        ).first()
+
+        if existing_evidence:
+            existing_evidence.source_locator = source_locator
+            existing_evidence.extracted_value = evidence_res.get("extracted_value")
+            existing_evidence.confidence = evidence_res.get("confidence", 0.0)
+            existing_evidence.document_chunk_id = top_match_chunk_id
+            existing_evidence.regulation_version = field.regulation_version
+            existing_evidence.prompt_version = "v1.0"
+            existing_evidence.model_parameters = {"temperature": 0.0, "response_format": "json_object"}
+            existing_evidence.updated_at = datetime.datetime.utcnow()
+        else:
+            new_evidence = FieldEvidence(
+                id=str(uuid.uuid4()),
+                project_id=project_id,
+                regulation_field_id=field.id,
+                document_chunk_id=top_match_chunk_id,
+                source_locator=source_locator,
+                extracted_value=evidence_res.get("extracted_value"),
+                confidence=evidence_res.get("confidence", 0.0),
+                extraction_method="groq_llama3" if GROQ_API_KEY else "simulation_engine",
+                regulation_version=field.regulation_version,
+                prompt_version="v1.0",
+                model_parameters={"temperature": 0.0, "response_format": "json_object"}
+            )
+            db.add(new_evidence)
 
         # Draft compliance statement narrative
         draft_res = GenerationService.draft_answer(
@@ -826,6 +867,173 @@ def reject_disclosure_answer(answer_id: str, reviewer_id: Optional[str] = None, 
     return {"message": "Disclosure rejected."}
 
 
+# --- Regulation Fields & Cross-Framework Endpoints (NEW) ---
+
+@app.get("/api/regulation-fields", response_model=List[RegFieldResponse])
+def get_all_regulation_fields(framework: Optional[str] = None, db: Session = Depends(get_db)):
+    """List all regulation fields across frameworks with legal metadata."""
+    query = db.query(RegulationField)
+    if framework:
+        query = query.filter(RegulationField.framework == framework)
+    return query.all()
+
+
+@app.get("/api/regulation-fields/{field_id}/cross-references")
+def get_field_cross_references(field_id: str, db: Session = Depends(get_db)):
+    """Get cross-framework links for a specific field, resolved to full field objects."""
+    field = db.query(RegulationField).filter(RegulationField.id == field_id).first()
+    if not field:
+        raise HTTPException(status_code=404, detail="Field not found.")
+    
+    cross_refs = field.cross_references or []
+    resolved = []
+    for ref in cross_refs:
+        linked_field = db.query(RegulationField).filter(
+            RegulationField.field_code == ref.get("field_code")
+        ).first()
+        resolved.append({
+            "framework": ref.get("framework"),
+            "field_code": ref.get("field_code"),
+            "relationship": ref.get("relationship"),
+            "field_label": linked_field.field_label if linked_field else "Unknown",
+            "legal_basis": linked_field.legal_basis if linked_field else None,
+            "penalty_tier": linked_field.penalty_tier if linked_field else None,
+            "annex_code": linked_field.annex_code if linked_field else None
+        })
+    
+    return {
+        "source_field": {
+            "id": field.id,
+            "field_code": field.field_code,
+            "field_label": field.field_label,
+            "framework": field.framework
+        },
+        "cross_references": resolved
+    }
+
+
+# --- What-If Simulator Endpoints (NEW) ---
+
+@app.get("/api/what-if/templates")
+def get_what_if_templates():
+    """Return pre-built what-if scenario templates."""
+    return WhatIfEngine.get_templates()
+
+
+@app.post("/api/projects/{project_id}/what-if", response_model=WhatIfScenarioResponse)
+def run_what_if_scenario(project_id: str, scenario_in: WhatIfScenarioCreate,
+                         db: Session = Depends(get_db)):
+    """Run a what-if legal risk simulation on a project."""
+    project = db.query(ReportingProject).filter(ReportingProject.id == project_id).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found.")
+
+    result = WhatIfEngine.run_scenario(
+        db=db,
+        project_id=project_id,
+        scenario_name=scenario_in.scenario_name,
+        scenario_description=scenario_in.scenario_description,
+        parameters=scenario_in.parameters
+    )
+
+    # Audit log
+    audit = AuditLog(
+        id=str(uuid.uuid4()),
+        entity_type="what_if",
+        entity_id=result.id,
+        action="simulate",
+        actor_id="system",
+        project_id=project_id,
+        payload={"scenario": scenario_in.scenario_name, "risk_score": result.risk_score}
+    )
+    db.add(audit)
+    db.commit()
+
+    return result
+
+
+@app.get("/api/projects/{project_id}/what-if", response_model=List[WhatIfScenarioResponse])
+def get_project_what_if_scenarios(project_id: str, db: Session = Depends(get_db)):
+    """List all what-if scenarios run for a project."""
+    return db.query(WhatIfScenario).filter(
+        WhatIfScenario.project_id == project_id
+    ).order_by(WhatIfScenario.created_at.desc()).all()
+
+
+# --- Legal Risk Summary Endpoint (NEW) ---
+
+@app.get("/api/projects/{project_id}/legal-summary", response_model=LegalRiskSummary)
+def get_project_legal_summary(project_id: str, db: Session = Depends(get_db)):
+    """Aggregated legal risk summary for a project."""
+    project = db.query(ReportingProject).filter(ReportingProject.id == project_id).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found.")
+
+    # Get all SFDR fields for this project type
+    sfdr_fields = db.query(RegulationField).filter(
+        RegulationField.disclosure_type == project.disclosure_type,
+        RegulationField.framework == "SFDR"
+    ).all()
+
+    # Count by penalty tier
+    tier_counts = {"Critical": 0, "High": 0, "Medium": 0, "Low": 0}
+    critical_gaps = 0
+    escalation_count = 0
+    top_obligations = []
+
+    for field in sfdr_fields:
+        tier = field.penalty_tier or "Medium"
+        tier_counts[tier] = tier_counts.get(tier, 0) + 1
+
+        # Check if field has failing validations
+        failing = db.query(ValidationResult).filter(
+            ValidationResult.project_id == project_id,
+            ValidationResult.regulation_field_id == field.id,
+            ValidationResult.passed == False
+        ).all()
+
+        if failing:
+            if tier in ("Critical", "High"):
+                critical_gaps += 1
+            for v in failing:
+                if v.escalation_required:
+                    escalation_count += 1
+                top_obligations.append({
+                    "field_code": field.field_code,
+                    "field_label": field.field_label,
+                    "penalty_tier": tier,
+                    "regulation_ref": v.regulation_ref,
+                    "message": v.details.get("message", "") if v.details else ""
+                })
+
+    # Risk score: weighted sum
+    tier_weights = {"Critical": 25, "High": 15, "Medium": 8, "Low": 3}
+    total_risk = sum(tier_weights.get(t, 5) * c for t, c in tier_counts.items() if c > 0)
+    max_risk = sum(tier_weights.get(t, 5) * len(sfdr_fields) for t in ["Critical"])  # normalize
+    risk_score = min(100, (critical_gaps / max(len(sfdr_fields), 1)) * 100)
+
+    # Framework coverage
+    sfdr_compliant = len(sfdr_fields) - critical_gaps
+    csrd_fields = db.query(RegulationField).filter(
+        RegulationField.framework == "CSRD"
+    ).all()
+
+    return {
+        "total_fields": len(sfdr_fields),
+        "critical_gaps": critical_gaps,
+        "high_risk_fields": tier_counts["High"],
+        "medium_risk_fields": tier_counts["Medium"],
+        "low_risk_fields": tier_counts["Low"],
+        "total_risk_score": round(risk_score, 1),
+        "escalation_count": escalation_count,
+        "top_obligations": sorted(top_obligations, key=lambda x: {"Critical": 0, "High": 1, "Medium": 2, "Low": 3}.get(x["penalty_tier"], 4))[:10],
+        "framework_coverage": {
+            "SFDR": {"total": len(sfdr_fields), "compliant": sfdr_compliant},
+            "CSRD": {"total": len(csrd_fields), "compliant": 0}
+        }
+    }
+
+
 # --- Exports ---
 
 @app.get("/api/projects/{project_id}/export/markdown")
@@ -921,9 +1129,9 @@ def serve_index():
             return f.read()
     return """
     <html>
-        <head><title>SFDR Compliance Workspace</title></head>
+        <head><title>Regulatory Intelligence Engine</title></head>
         <body style="font-family:sans-serif; text-align:center; padding-top:100px;">
-            <h1>SFDR Compliance Workspace API is running</h1>
+            <h1>Regulatory Intelligence & Compliance Workflow Engine</h1>
             <p>Please build/create the static folder and index.html file to view the rich UI workspace.</p>
             <p><a href="/docs">View REST API Documentation (Swagger)</a></p>
         </body>

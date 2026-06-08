@@ -32,6 +32,12 @@ class Severity(str, enum.Enum):
     WARNING = "Warning"
     ERROR = "Error"
 
+class PenaltyTier(str, enum.Enum):
+    LOW = "Low"
+    MEDIUM = "Medium"
+    HIGH = "High"
+    CRITICAL = "Critical"
+
 
 class User(Base):
     __tablename__ = "users"
@@ -99,6 +105,7 @@ class ReportingProject(Base):
     field_evidence = relationship("FieldEvidence", back_populates="project", cascade="all, delete-orphan")
     field_answers = relationship("FieldAnswer", back_populates="project", cascade="all, delete-orphan")
     validation_results = relationship("ValidationResult", back_populates="project", cascade="all, delete-orphan")
+    what_if_scenarios = relationship("WhatIfScenario", back_populates="project", cascade="all, delete-orphan")
 
 
 class Document(Base):
@@ -147,6 +154,12 @@ class RegulationField(Base):
     mandatory = Column(Boolean, default=True)
     guidance = Column(JSON, nullable=True)            # JSON metadata for rules and guides
     regulation_version = Column(String, default="2022/1288", nullable=False)
+
+    # --- Legal Consequence Metadata (NEW) ---
+    legal_basis = Column(String, nullable=True)       # e.g., "SFDR Art. 7(1)(a), RTS Art. 5"
+    penalty_tier = Column(String, default=PenaltyTier.MEDIUM.value)  # Low/Medium/High/Critical
+    enforcement_body = Column(String, nullable=True)  # e.g., "ESMA", "National Competent Authority"
+    cross_references = Column(JSON, nullable=True)    # [{framework, field_code, relationship}]
 
     answers = relationship("FieldAnswer", back_populates="regulation_field", cascade="all, delete-orphan")
     evidence = relationship("FieldEvidence", back_populates="regulation_field", cascade="all, delete-orphan")
@@ -233,7 +246,32 @@ class ValidationResult(Base):
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
 
+    # --- Legal Consequence Fields (NEW) ---
+    regulation_ref = Column(String, nullable=True)    # e.g., "SFDR RTS Annex I, Article 1.14"
+    legal_consequence = Column(Text, nullable=True)   # human-readable legal consequence
+    penalty_range = Column(String, nullable=True)     # e.g., "Up to €5M or 10% annual turnover"
+    remediation = Column(Text, nullable=True)         # actionable remediation steps
+    escalation_required = Column(Boolean, default=False)
+
     project = relationship("ReportingProject", back_populates="validation_results")
+
+
+class WhatIfScenario(Base):
+    """Stores what-if legal risk simulation results for a project."""
+    __tablename__ = "what_if_scenarios"
+
+    id = Column(String, primary_key=True, index=True)
+    project_id = Column(String, ForeignKey("reporting_projects.id", ondelete="CASCADE"), nullable=False)
+    scenario_name = Column(String, nullable=False)
+    scenario_description = Column(Text, nullable=True)
+    parameters = Column(JSON, nullable=True)          # scenario input parameters
+    triggered_obligations = Column(JSON, nullable=True)  # list of triggered regulation articles
+    legal_consequences = Column(JSON, nullable=True)  # list of consequence objects
+    risk_score = Column(Float, default=0.0)           # computed overall risk score (0-100)
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    created_by = Column(String, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+
+    project = relationship("ReportingProject", back_populates="what_if_scenarios")
 
 
 class AuditLog(Base):

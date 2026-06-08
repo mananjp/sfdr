@@ -218,13 +218,14 @@ const RequirementMatrix = () => {
                 <th className="p-4 font-semibold">RTS Code</th>
                 <th className="p-4 font-semibold">Status</th>
                 <th className="p-4 font-semibold">Extracted Value</th>
+                <th className="p-4 font-semibold">Legal Risk</th>
                 <th className="p-4 pr-6 font-semibold">Validation</th>
               </tr>
             </thead>
             <motion.tbody variants={containerVariants} initial="hidden" animate="show" className="divide-y divide-slate-100">
               {isMatrixLoading ? (
                 <tr>
-                  <td colSpan="5" className="p-12">
+                  <td colSpan="6" className="p-12">
                     <div className="flex flex-col items-center justify-center gap-3">
                       <div className="w-8 h-8 border-4 border-slate-200 border-t-primary-600 rounded-full animate-spin"></div>
                       <span className="text-slate-500 font-bold text-sm">Fetching matrix records...</span>
@@ -232,14 +233,25 @@ const RequirementMatrix = () => {
                   </td>
                 </tr>
               ) : !selectedProjectId ? (
-                <tr><td colSpan="5" className="p-8 text-center text-slate-500 font-medium">Please select a project from the Active Workspace dropdown.</td></tr>
+                <tr><td colSpan="6" className="p-8 text-center text-slate-500 font-medium">Please select a project from the Active Workspace dropdown.</td></tr>
               ) : matrixItems.length === 0 ? (
-                <tr><td colSpan="5" className="p-8 text-center text-slate-500 font-medium">No matrix data available.</td></tr>
+                <tr><td colSpan="6" className="p-8 text-center text-slate-500 font-medium">No matrix data available.</td></tr>
               ) : matrixItems.map(item => (
                 <motion.tr variants={rowVariants} key={item.field_id} className="hover:bg-slate-50/50 transition-colors group cursor-pointer">
                   <td className="p-4 pl-6">
-                    <span className="font-bold text-slate-800 group-hover:text-primary-600 transition-colors">{item.field_label}</span>
-                    {item.mandatory && <span className="text-rose-500 ml-1 font-bold">*</span>}
+                    <div className="flex flex-col">
+                      <span className="font-bold text-slate-800 group-hover:text-primary-600 transition-colors">{item.field_label}</span>
+                      {item.mandatory && <span className="text-rose-500 font-bold text-xs mt-0.5">* Mandatory</span>}
+                      {item.cross_references && item.cross_references.length > 0 && (
+                        <div className="flex flex-wrap gap-1 mt-1.5">
+                          {item.cross_references.map((ref, idx) => (
+                            <span key={idx} className="inline-flex items-center text-[10px] font-bold bg-indigo-50/80 text-indigo-600 rounded px-1.5 py-0.5 border border-indigo-100/50">
+                              🔗 {ref.framework}: {ref.field_code}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                    </div>
                   </td>
                   <td className="p-4">
                     <code className="text-xs bg-slate-100 text-slate-600 px-2 py-1 rounded-md font-mono border border-slate-200">{item.field_code}</code>
@@ -254,6 +266,16 @@ const RequirementMatrix = () => {
                   </td>
                   <td className="p-4 font-semibold text-slate-700 max-w-xs truncate">
                     {item.extracted_value?.value || item.extracted_value || '-'}
+                  </td>
+                  <td className="p-4">
+                    <span className={`inline-flex items-center text-[11px] font-bold px-2 py-0.5 rounded-full border ${
+                      item.penalty_tier === 'Critical' ? 'bg-red-50 text-red-700 border-red-200' :
+                      item.penalty_tier === 'High' ? 'bg-orange-50 text-orange-700 border-orange-200' :
+                      item.penalty_tier === 'Medium' ? 'bg-amber-50 text-amber-700 border-amber-200' :
+                      'bg-emerald-50 text-emerald-700 border-emerald-200'
+                    }`}>
+                      {item.penalty_tier || 'Medium'}
+                    </span>
                   </td>
                   <td className="p-4 pr-6">
                     <span className={`text-sm font-bold flex items-center gap-1.5 ${item.validation_passed ? 'text-emerald-600' : 'text-rose-600'}`}>

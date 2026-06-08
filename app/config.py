@@ -16,7 +16,8 @@ DATA_DIR.mkdir(parents=True, exist_ok=True)
 UPLOAD_DIR = DATA_DIR / "uploads"
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
-DATABASE_URL = os.getenv("NEON_URL", os.getenv("DATABASE_URL", f"sqlite:///{DATA_DIR}/sfdr.db"))
+# Database: prefer Neon PostgreSQL, fall back to SQLite for offline dev
+DATABASE_URL = os.getenv("NEON_URL") or os.getenv("DATABASE_URL") or f"sqlite:///{DATA_DIR}/sfdr.db"
 
 # API Keys
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
