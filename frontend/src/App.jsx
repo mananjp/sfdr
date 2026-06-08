@@ -11,11 +11,15 @@ import AuthLayout from './layouts/AuthLayout';
 import Login from './pages/Login';
 import Signup from './pages/Signup';
 
+// Landing Page
+import Home from './pages/Home';
+
 // Protected Pages
 import Dashboard from './pages/Dashboard';
 import RequirementMatrix from './pages/RequirementMatrix';
 import ReviewerDesk from './pages/ReviewerDesk';
 import AuditTrail from './pages/AuditTrail';
+import AuditExport from './pages/AuditExport';
 import Settings from './pages/Settings';
 
 const ProtectedRoute = () => {
@@ -40,6 +44,9 @@ function App() {
     <AuthProvider>
       <BrowserRouter>
         <Routes>
+          {/* Public Landing Page */}
+          <Route path="/" element={<Home />} />
+
           {/* Public Auth Routes */}
           <Route element={<AuthLayout />}>
             <Route path="/login" element={<Login />} />
@@ -48,13 +55,13 @@ function App() {
 
           {/* Protected App Routes */}
           <Route element={<ProtectedRoute />}>
-            <Route path="/" element={<MainLayout />}>
-              <Route index element={<Navigate to="/dashboard" replace />} />
-              <Route path="dashboard" element={<Dashboard />} />
-              <Route path="matrix" element={<RequirementMatrix />} />
-              <Route path="reviewer" element={<ReviewerDesk />} />
-              <Route path="audit" element={<AuditTrail />} />
-              <Route path="settings" element={<Settings />} />
+            <Route element={<MainLayout />}>
+              <Route path="/dashboard" element={<Dashboard />} />
+              <Route path="/matrix" element={<RequirementMatrix />} />
+              <Route path="/reviewer" element={<ReviewerDesk />} />
+              <Route path="/audit" element={<AuditTrail />} />
+              <Route path="/exports" element={<AuditExport />} />
+              <Route path="/settings" element={<Settings />} />
             </Route>
           </Route>
         </Routes>

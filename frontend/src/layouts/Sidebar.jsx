@@ -1,6 +1,6 @@
 import React from 'react';
 import { NavLink } from 'react-router-dom';
-import { LayoutDashboard, Table, ClipboardCheck, History, Settings, X, ShieldAlert, LogOut } from 'lucide-react';
+import { LayoutDashboard, Table, ClipboardCheck, History, Settings, X, ShieldAlert, LogOut, Package } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 
 const Sidebar = ({ isOpen, onClose }) => {
@@ -35,6 +35,7 @@ const Sidebar = ({ isOpen, onClose }) => {
             { to: '/matrix', icon: Table, label: 'Requirement Matrix' },
             { to: '/reviewer', icon: ClipboardCheck, label: 'Reviewer Desk' },
             { to: '/audit', icon: History, label: 'Audit Trail' },
+            { to: '/exports', icon: Package, label: 'Export Package' },
             { to: '/settings', icon: Settings, label: 'Settings' }
           ].map((item) => (
             <NavLink
