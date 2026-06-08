@@ -35,7 +35,13 @@ def run_e2e_verification():
     try:
         # 2. Seed default regulations and entities
         print("[Step 2] Seeding standard SFDR framework fields...")
-        system_user = User(id="system", username="system", email="system@veritas.com", role="Administrator")
+        system_user = User(
+            id="system",
+            username="system",
+            email="system@veritas.com",
+            hashed_password="mock_hash",
+            role="Administrator"
+        )
         db.add(system_user)
         
         org = Organization(id="verify_org", name="Veritas Sustainable Asset Management Ltd", type="Asset Manager")
@@ -301,7 +307,13 @@ def run_e2e_verification():
 
         # 6d. Test User creation & Reviewer approvals
         print("\n[Step 6d] Testing User creation & Reviewer approvals...")
-        reviewer = User(id="user_bob", username="reviewer_bob", email="bob@veritas.com", role="Reviewer")
+        reviewer = User(
+            id="user_bob",
+            username="reviewer_bob",
+            email="bob@veritas.com",
+            hashed_password="mock_hash",
+            role="Reviewer"
+        )
         db.add(reviewer)
         db.commit()
         

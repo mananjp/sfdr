@@ -18,21 +18,28 @@ const itemVariants = {
   show: { opacity: 1, y: 0, transition: { type: 'spring', stiffness: 300, damping: 25 } }
 };
 
-const WhatIfSimulator = () => {
+const RegulatoryImpactSimulator = () => {
   const { projects, isLoadingProjects } = useProjects();
   const [selectedProjectId, setSelectedProjectId] = useState('');
   const [templates, setTemplates] = useState([]);
   const [history, setHistory] = useState([]);
   const [legalSummary, setLegalSummary] = useState(null);
-  const [activeTab, setActiveTab] = useState('templates'); // 'templates' | 'history'
+  const [activeTab, setActiveTab] = useState('templates'); // 'templates' | 'custom' | 'history'
   
   // Simulation execution state
   const [isSimulating, setIsSimulating] = useState(false);
   const [simResult, setSimResult] = useState(null);
   const [customParams, setCustomParams] = useState({
-    action: 'remove_field',
-    field_code: 'PAI_GHG_SCOPE3',
-    rationale: 'Company data unavailable'
+    scenario_name: '',
+    action: 'disclosure_omission',
+    framework: 'SFDR',
+    entity: 'Financial Product',
+    field_code: '',
+    current_value: '',
+    proposed_value: '',
+    jurisdiction: 'EU / General',
+    reporting_period: '2026',
+    free_text_context: ''
   });
   
   const selectedProject = projects.find(p => p.id === selectedProjectId);
@@ -88,7 +95,7 @@ const WhatIfSimulator = () => {
       setActiveTab('result');
     } catch (err) {
       console.error('Simulation run failed', err);
-      alert('Failed to execute what-if simulation.');
+      alert('Failed to execute regulatory impact simulation.');
     } finally {
       setIsSimulating(false);
     }
@@ -121,7 +128,7 @@ const WhatIfSimulator = () => {
             <Scale size={20} strokeWidth={2.5} />
           </div>
           <div>
-            <h1 className="text-xl font-bold text-slate-900">What-If Legal Risk Simulator</h1>
+            <h1 className="text-xl font-bold text-slate-900">Regulatory Impact Simulator</h1>
             <p className="text-sm font-medium text-slate-500">Test compliance scenarios, predict regulatory fines, and assess policy change impact.</p>
           </div>
         </div>
@@ -222,7 +229,17 @@ const WhatIfSimulator = () => {
                       : 'border-transparent text-slate-500 hover:text-slate-700'
                   }`}
                 >
-                  Scenario Templates
+                  Templates
+                </button>
+                <button 
+                  onClick={() => setActiveTab('custom')}
+                  className={`flex-1 py-3 text-xs font-bold border-b-2 transition-all ${
+                    activeTab === 'custom' 
+                      ? 'border-indigo-600 text-indigo-700 bg-white' 
+                      : 'border-transparent text-slate-500 hover:text-slate-700'
+                  }`}
+                >
+                  Custom Builder
                 </button>
                 <button 
                   onClick={() => setActiveTab('history')}
@@ -232,7 +249,7 @@ const WhatIfSimulator = () => {
                       : 'border-transparent text-slate-500 hover:text-slate-700'
                   }`}
                 >
-                  Simulation History ({history.length})
+                  History ({history.length})
                 </button>
               </div>
 
@@ -259,6 +276,143 @@ const WhatIfSimulator = () => {
                     ))}
                   </>
                 )}
+
+                {activeTab === 'custom' && (
+                  <form onSubmit={(e) => {
+                    e.preventDefault();
+                    const scenario = {
+                      scenario_name: customParams.scenario_name || 'Custom Compliance Scenario',
+                      scenario_description: customParams.free_text_context || 'User-defined operational compliance change',
+                      parameters: customParams
+                    };
+                    handleRunSimulation(scenario);
+                  }} className="space-y-4">
+                    <div>
+                      <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Scenario Name</label>
+                      <input 
+                        type="text" 
+                        required
+                        className="form-input text-xs w-full p-2.5 bg-slate-50 border border-slate-200 rounded-lg"
+                        placeholder="e.g. Estimate Scope 3 using sector proxies"
+                        value={customParams.scenario_name || ''}
+                        onChange={(e) => setCustomParams({ ...customParams, scenario_name: e.target.value })}
+                      />
+                    </div>
+                     <div>
+                      <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Scenario Type (Action)</label>
+                      <select 
+                        className="form-input text-xs w-full p-2.5 bg-slate-50 border border-slate-200 rounded-lg"
+                        value={customParams.action}
+                        onChange={(e) => setCustomParams({ ...customParams, action: e.target.value })}
+                      >
+                        <option value="disclosure_omission">Disclosure Omission (non-reporting)</option>
+                        <option value="threshold_change">Metric Threshold Breach</option>
+                        <option value="reclassify_article">Fund Reclassification</option>
+                        <option value="estimation_methodology_change">Estimation Methodology Change</option>
+                        <option value="delayed_filing">Delayed Submission / Filing</option>
+                        <option value="data_collection_change">Data Collection Change</option>
+                        <option value="control_failure">Governance Control Failure</option>
+                      </select>
+                    </div>
+                    <div className="grid grid-cols-3 gap-3">
+                      <div>
+                        <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Framework</label>
+                        <select 
+                          className="form-input text-xs w-full p-2.5 bg-slate-50 border border-slate-200 rounded-lg"
+                          value={customParams.framework}
+                          onChange={(e) => setCustomParams({ ...customParams, framework: e.target.value })}
+                        >
+                          <option value="SFDR">SFDR</option>
+                          <option value="CSRD">CSRD</option>
+                          <option value="EU Taxonomy">EU Taxonomy</option>
+                          <option value="GDPR">GDPR</option>
+                          <option value="Other">Other</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Entity Type</label>
+                        <input 
+                          type="text" 
+                          className="form-input text-xs w-full p-2.5 bg-slate-50 border border-slate-200 rounded-lg"
+                          placeholder="e.g. Fund"
+                          value={customParams.entity || ''}
+                          onChange={(e) => setCustomParams({ ...customParams, entity: e.target.value })}
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Period</label>
+                        <input 
+                          type="text" 
+                          className="form-input text-xs w-full p-2.5 bg-slate-50 border border-slate-200 rounded-lg"
+                          placeholder="e.g. 2026"
+                          value={customParams.reporting_period || ''}
+                          onChange={(e) => setCustomParams({ ...customParams, reporting_period: e.target.value })}
+                        />
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Target Field Code</label>
+                        <input 
+                          type="text" 
+                          className="form-input text-xs w-full p-2.5 bg-slate-50 border border-slate-200 rounded-lg font-mono"
+                          placeholder="e.g. PAI_GHG_SCOPE3"
+                          value={customParams.field_code || ''}
+                          onChange={(e) => setCustomParams({ ...customParams, field_code: e.target.value })}
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Jurisdiction</label>
+                        <input 
+                          type="text" 
+                          className="form-input text-xs w-full p-2.5 bg-slate-50 border border-slate-200 rounded-lg"
+                          placeholder="e.g. EU / General"
+                          value={customParams.jurisdiction || ''}
+                          onChange={(e) => setCustomParams({ ...customParams, jurisdiction: e.target.value })}
+                        />
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Current Value</label>
+                        <input 
+                          type="text" 
+                          className="form-input text-xs w-full p-2.5 bg-slate-50 border border-slate-200 rounded-lg"
+                          placeholder="e.g. 15%"
+                          value={customParams.current_value || ''}
+                          onChange={(e) => setCustomParams({ ...customParams, current_value: e.target.value })}
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Proposed Value</label>
+                        <input 
+                          type="text" 
+                          className="form-input text-xs w-full p-2.5 bg-slate-50 border border-slate-200 rounded-lg"
+                          placeholder="e.g. Estimated proxy"
+                          value={customParams.proposed_value || ''}
+                          onChange={(e) => setCustomParams({ ...customParams, proposed_value: e.target.value })}
+                        />
+                      </div>
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Natural Language Context</label>
+                      <textarea 
+                        className="form-input text-xs w-full p-2.5 bg-slate-50 border border-slate-200 rounded-lg h-20 resize-none leading-relaxed"
+                        placeholder="Provide details of the scenario for AI evaluation..."
+                        value={customParams.free_text_context || ''}
+                        onChange={(e) => setCustomParams({ ...customParams, free_text_context: e.target.value })}
+                      ></textarea>
+                    </div>
+                    <button 
+                      type="submit" 
+                      disabled={isSimulating}
+                      className="btn btn-primary w-full justify-center shadow-lg shadow-indigo-500/20 text-xs py-2.5"
+                    >
+                      {isSimulating ? <RefreshCw size={14} className="animate-spin" /> : <Play size={14} fill="currentColor" />}
+                      <span>{isSimulating ? 'Evaluating...' : 'Simulate Custom Scenario'}</span>
+                    </button>
+                  </form>
+                ) }
 
                 {activeTab === 'history' && (
                   <div className="space-y-3">
@@ -449,7 +603,7 @@ const WhatIfSimulator = () => {
         <div className="glass-card p-12 flex flex-col items-center justify-center text-center">
           <Scale size={48} className="text-slate-300 mb-4" />
           <h3 className="text-xl font-bold text-slate-800 mb-2">Select a Project</h3>
-          <p className="text-slate-500 font-medium max-w-sm">Choose an active reporting project in the dropdown above to load the What-If simulation workspace.</p>
+          <p className="text-slate-500 font-medium max-w-sm">Choose an active reporting project in the dropdown above to load the Regulatory Impact simulation workspace.</p>
         </div>
       )}
 
@@ -457,4 +611,4 @@ const WhatIfSimulator = () => {
   );
 };
 
-export default WhatIfSimulator;
+export default RegulatoryImpactSimulator;

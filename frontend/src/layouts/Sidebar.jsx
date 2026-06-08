@@ -34,7 +34,7 @@ const Sidebar = ({ isOpen, onClose }) => {
             { to: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
             { to: '/matrix', icon: Table, label: 'Requirement Matrix' },
             { to: '/reviewer', icon: ClipboardCheck, label: 'Reviewer Desk' },
-            { to: '/whatif', icon: Scale, label: 'What-If Simulator' },
+            { to: '/regulatory-impact', icon: Scale, label: 'Regulatory Impact Simulator' },
             { to: '/audit', icon: History, label: 'Audit Trail' },
             { to: '/exports', icon: Package, label: 'Export Package' },
             { to: '/settings', icon: Settings, label: 'Settings' }

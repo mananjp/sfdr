@@ -18,7 +18,7 @@ import Home from './pages/Home';
 import Dashboard from './pages/Dashboard';
 import RequirementMatrix from './pages/RequirementMatrix';
 import ReviewerDesk from './pages/ReviewerDesk';
-import WhatIfSimulator from './pages/WhatIfSimulator';
+import RegulatoryImpactSimulator from './pages/RegulatoryImpactSimulator';
 import AuditTrail from './pages/AuditTrail';
 import AuditExport from './pages/AuditExport';
 import Settings from './pages/Settings';
@@ -60,7 +60,7 @@ function App() {
               <Route path="/dashboard" element={<Dashboard />} />
               <Route path="/matrix" element={<RequirementMatrix />} />
               <Route path="/reviewer" element={<ReviewerDesk />} />
-              <Route path="/whatif" element={<WhatIfSimulator />} />
+              <Route path="/regulatory-impact" element={<RegulatoryImpactSimulator />} />
               <Route path="/audit" element={<AuditTrail />} />
               <Route path="/exports" element={<AuditExport />} />
               <Route path="/settings" element={<Settings />} />

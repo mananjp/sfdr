@@ -1,5 +1,6 @@
 import uuid
 import datetime
+import json
 from typing import Dict, Any, List, Optional
 from sqlalchemy.orm import Session
 from app.models import (
@@ -7,6 +8,8 @@ from app.models import (
     ReportingProject, Product
 )
 from app.seed_regulations import WHAT_IF_TEMPLATES
+from app.services.generation import GenerationService
+from app.config import DEFAULT_MODEL
 
 # =============================================================================
 # Regulatory consequence knowledge base for what-if simulations
@@ -147,11 +150,7 @@ class WhatIfEngine:
         elif action == "reclassify_article":
             result = cls._handle_reclassification(db, project_id, parameters)
         else:
-            result = {
-                "triggered_obligations": [{"description": "Unknown scenario type. No obligations triggered."}],
-                "legal_consequences": [],
-                "risk_score": 0.0
-            }
+            result = cls._handle_custom_scenario(db, project_id, parameters)
 
         # Persist scenario
         scenario = WhatIfScenario(
@@ -310,8 +309,8 @@ class WhatIfEngine:
     def _handle_reclassification(cls, db: Session, project_id: str,
                                  params: Dict[str, Any]) -> Dict[str, Any]:
         """Simulate fund reclassification between SFDR articles."""
-        from_article = params.get("from_article", "Article 8")
-        to_article = params.get("to_article", "Article 6")
+        from_article = params.get("from_article") or params.get("current_value") or "Article 8"
+        to_article = params.get("to_article") or params.get("proposed_value") or "Article 6"
         key = f"{from_article} -> {to_article}"
 
         knowledge = RECLASSIFICATION_CONSEQUENCES.get(key, {})
@@ -356,6 +355,161 @@ class WhatIfEngine:
             "Article 8 -> Article 9": 30.0,
         }
         risk_score = risk_map.get(key, 50.0)
+
+        return {
+            "triggered_obligations": triggered_obligations,
+            "legal_consequences": legal_consequences,
+            "risk_score": risk_score
+        }
+
+    @classmethod
+    def _handle_custom_scenario(cls, db: Session, project_id: str,
+                                 params: Dict[str, Any]) -> Dict[str, Any]:
+        """Runs dynamic custom scenario evaluation via Groq LLM if available, falling back to rule heuristics."""
+        client = GenerationService.get_groq_client()
+        if client:
+            try:
+                system_prompt = (
+                    "You are a regulatory compliance AI auditor specializing in ESG regulations (SFDR, CSRD, EU Taxonomy).\n"
+                    "Your task is to evaluate a custom scenario defined by the user and assess the legal risks, obligations triggered, and potential regulatory penalties.\n"
+                    "Analyze the scenario parameters and optional natural language context.\n"
+                    "Calculate a risk score between 0.0 (no risk) and 100.0 (extreme risk / clear breach).\n"
+                    "You must output ONLY a valid JSON object matching the schema below. Do not wrap in markdown tags or extra text.\n"
+                    "Output JSON Schema:\n"
+                    "{\n"
+                    "  \"triggered_obligations\": [\n"
+                    "    {\n"
+                    "      \"regulation_article\": \"string (name of the article/rule, e.g., 'SFDR Art. 9(1)')\",\n"
+                    "      \"description\": \"string (how this scenario impacts or violates this obligation)\",\n"
+                    "      \"field_code\": \"string (associated field code, or 'CUSTOM')\"\n"
+                    "    }\n"
+                    "  ],\n"
+                    "  \"legal_consequences\": [\n"
+                    "    {\n"
+                    "      \"type\": \"string (regulatory_sanction | marketing_restriction | investor_redemption | reputational | audit_failure)\",\n"
+                    "      \"description\": \"string (detailed description of the penalty, exposure, or impact)\",\n"
+                    "      \"severity\": \"Low\" | \"Medium\" | \"High\" | \"Critical\"\n"
+                    "    }\n"
+                    "  ],\n"
+                    "  \"risk_score\": float\n"
+                    "}"
+                )
+
+                user_content = (
+                    f"Scenario Parameters:\n"
+                    f"- Action/Type: {params.get('action')}\n"
+                    f"- Regulatory Framework: {params.get('framework') or 'SFDR'}\n"
+                    f"- Entity Type: {params.get('entity') or 'Fund / Financial Product'}\n"
+                    f"- Metric/Field Code: {params.get('field_code') or 'Not specified'}\n"
+                    f"- Current Value: {params.get('current_value') or 'Not specified'}\n"
+                    f"- Proposed Value: {params.get('proposed_value') or 'Not specified'}\n"
+                    f"- Jurisdiction: {params.get('jurisdiction') or 'EU / General'}\n"
+                    f"- Reporting Period: {params.get('reporting_period') or 'Annual'}\n"
+                    f"- Natural Language Context: \"{params.get('free_text_context') or ''}\"\n"
+                )
+
+                response = client.chat.completions.create(
+                    model=DEFAULT_MODEL,
+                    messages=[
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_content}
+                    ],
+                    temperature=0.2,
+                    response_format={"type": "json_object"}
+                )
+                
+                result_json = json.loads(response.choices[0].message.content)
+                if "triggered_obligations" in result_json and "legal_consequences" in result_json and "risk_score" in result_json:
+                    return result_json
+            except Exception as e:
+                print(f"Error in custom what-if LLM evaluation: {e}. Falling back to simulation.")
+
+        # High-fidelity simulation fallback
+        action = params.get("action", "custom_scenario")
+        field_code = params.get("field_code", "")
+        proposed_value = params.get("proposed_value", "")
+        free_text = (params.get("free_text_context") or "").lower()
+
+        # Build custom response based on keywords
+        triggered_obligations = []
+        legal_consequences = []
+        risk_score = 50.0
+
+        if "omission" in action or "remove" in action or "omit" in free_text or "disclosure_omission" in action:
+            risk_score = 80.0
+            triggered_obligations = [
+                {
+                    "regulation_article": "SFDR Art. 7(1) — Principal Adverse Impacts",
+                    "description": f"Omission of metric '{field_code or 'disclosures'}' breaches mandatory transparency requirements.",
+                    "field_code": field_code or "CUSTOM"
+                },
+                {
+                    "regulation_article": "RTS Annex I Table 1",
+                    "description": "Failure to report on all mandatory indicators is a core compliance breach.",
+                    "field_code": field_code or "CUSTOM"
+                }
+            ]
+            legal_consequences = [
+                {
+                    "type": "regulatory_sanction",
+                    "description": "National Competent Authorities (NCAs) may issue administrative fines and order corrective disclosure filings.",
+                    "severity": "High"
+                },
+                {
+                    "type": "reputational",
+                    "description": "Exposures to claims of greenwashing and potential downgrades by ESG rating providers.",
+                    "severity": "High"
+                }
+            ]
+        elif "delay" in action or "delayed" in free_text or "delayed_filing" in action:
+            risk_score = 40.0
+            triggered_obligations = [
+                {
+                    "regulation_article": "SFDR Article 11(1) — Reporting Timelines",
+                    "description": "Delayed submission of disclosures violates the regulatory publication deadlines (typically June 30).",
+                    "field_code": "TIMELINE"
+                }
+            ]
+            legal_consequences = [
+                {
+                    "type": "audit_failure",
+                    "description": "Auditor notes on delayed regulatory filings, leading to qualified compliance opinions.",
+                    "severity": "Medium"
+                }
+            ]
+        elif "estimate" in action or "estimation" in free_text or "average" in free_text or "estimation_methodology_change" in action:
+            risk_score = 30.0
+            triggered_obligations = [
+                {
+                    "regulation_article": "ESMA Guidelines on Data Quality",
+                    "description": "Using estimated values is permitted only under strict 'best efforts' rules and must be clearly disclosed with calculation methodology.",
+                    "field_code": field_code or "CUSTOM"
+                }
+            ]
+            legal_consequences = [
+                {
+                    "type": "regulatory_attention",
+                    "description": "Regulators may audit the estimation model to ensure no material misstatement of ESG metrics.",
+                    "severity": "Low"
+                }
+            ]
+        else:
+            # General custom scenario response
+            risk_score = 65.0
+            triggered_obligations = [
+                {
+                    "regulation_article": "SFDR Article 4 / 7 — Transparency obligations",
+                    "description": f"Custom scenario involving '{action}' affects the compliance status of field '{field_code or 'general'}'.",
+                    "field_code": field_code or "CUSTOM"
+                }
+            ]
+            legal_consequences = [
+                {
+                    "type": "regulatory_scrutiny",
+                    "description": "User-defined operational change may trigger inquiries from National Competent Authorities depending on final implementation.",
+                    "severity": "Medium"
+                }
+            ]
 
         return {
             "triggered_obligations": triggered_obligations,
