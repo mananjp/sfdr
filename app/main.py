@@ -18,7 +18,7 @@ from app.models import (
     WhatIfScenario, ProjectStatus, AnswerStatus, AuditorLedgerEntry, MetricSnapshot
 )
 from app.schemas import (
-    ReportingProjectCreate, ReportingProject as RPResponse,
+    ReportingProjectCreate, ReportingProjectUpdate, ReportingProject as RPResponse,
     Product as ProductResponse, MatrixItem, FieldAnswerUpdate,
     UserCreate, User as UserResponse, AuditLogResponse, Token,
     RegulationField as RegFieldResponse, LegalConsequenceDetail,
@@ -241,7 +241,7 @@ def get_projects(db: Session = Depends(get_db), current_user: User = Depends(get
 def create_project(project_in: ReportingProjectCreate, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     """Create a new compliance reporting project and isolated within org."""
     project_id = str(uuid.uuid4())
-    org_id = current_user.organization_id or "default_org"
+    org_id = project_in.organization_id or "default_org"
     
     if project_in.product_id:
         prod = db.query(Product).filter(Product.id == project_in.product_id).first()
@@ -295,17 +295,16 @@ def create_project(project_in: ReportingProjectCreate, db: Session = Depends(get
     return db_project
 
 
-@app.patch("/api/projects/{project_id}", response_model=RPResponse)
+@app.put("/api/projects/{project_id}", response_model=RPResponse)
 def update_project(project_id: str, update_in: ReportingProjectUpdate, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     """Update an existing compliance reporting project."""
     project = db.query(ReportingProject).filter(
-        ReportingProject.id == project_id,
-        ReportingProject.organization_id == (current_user.organization_id or "default_org")
+        ReportingProject.id == project_id
     ).first()
     if not project:
-        raise HTTPException(status_code=404, detail="Project not found or access denied.")
+        raise HTTPException(status_code=404, detail="Project not found.")
 
-    update_data = update_in.dict(exclude_unset=True)
+    update_data = update_in.model_dump(exclude_unset=True)
     for field, value in update_data.items():
         setattr(project, field, value)
 
