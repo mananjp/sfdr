@@ -16,18 +16,23 @@ export const ProjectProvider = ({ children }) => {
     setIsLoadingProjects(true);
     try {
       const response = await client.get('/projects');
-      setProjects(response.data);
+      if (Array.isArray(response.data)) {
+        setProjects(response.data);
 
-      // If we have a stored ID but it's not in the new projects list, clear it
-      if (selectedProjectId && !response.data.some(p => p.id === selectedProjectId)) {
-        if (response.data.length > 0) {
+        // If we have a stored ID but it's not in the new projects list, clear it
+        if (selectedProjectId && !response.data.some(p => p.id === selectedProjectId)) {
+          if (response.data.length > 0) {
+            selectProject(response.data[0].id);
+          } else {
+            selectProject(null);
+          }
+        } else if (!selectedProjectId && response.data.length > 0) {
+          // Auto-select first if none selected
           selectProject(response.data[0].id);
-        } else {
-          selectProject(null);
         }
-      } else if (!selectedProjectId && response.data.length > 0) {
-        // Auto-select first if none selected
-        selectProject(response.data[0].id);
+      } else {
+        console.error("Projects API did not return an array. Check if VITE_API_URL is configured correctly. Received:", response.data);
+        setProjects([]);
       }
     } catch (error) {
       console.error("Failed to load projects", error);
