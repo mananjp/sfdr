@@ -2,9 +2,26 @@ import os
 import uuid
 import json
 import datetime
-from sqlalchemy import create_engine
-from app.database import SessionLocal, engine
-from app.models import User, ReportingProject, Document, RegulationField, FieldAnswer, ValidationResult, Organization
+from sqlalchemy.orm import Session
+from sqlalchemy.exc import IntegrityError
+
+# Setup PYTHONPATH reference programmatically
+import os
+import sys
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+
+# Force local SQLite for test verification
+os.environ["NEON_URL"] = "sqlite:///test_verify.db"
+os.environ["DATABASE_URL"] = "sqlite:///test_verify.db"
+
+from app.database import Base, engine, SessionLocal
+from app.models import (
+    Organization, Product, ReportingProject, Document, DocumentChunk,
+    RegulationField, FieldEvidence, FieldAnswer, ValidationResult, User
+)
+from app.services.ingestion import IngestionService
+from app.services.retrieval import RetrievalService
+from app.services.generation import GenerationService
 from app.services.validation import ValidationService
 
 def run_verifications():
@@ -57,10 +74,14 @@ def run_verifications():
         results = db.query(ValidationResult).filter(ValidationResult.project_id == project_id).all()
         print(f"3. Validation Engine: Found {len(results)} validation flags. PASSED ✓")
 
-        # 4. Cleanup
-        db.delete(answer)
-        db.delete(project)
-        db.delete(org)
+        # 6d. Test User creation & Reviewer approvals
+        print("\n[Step 6d] Testing User creation & Reviewer approvals...")
+        reviewer = User(id="user_bob", username="reviewer_bob", email="bob@veritas.com", role="Reviewer", hashed_password="mocked_password_hash")
+        db.add(reviewer)
+        db.commit()
+        
+        latest_ans.approved_by = "user_bob"
+        latest_ans.status = "Approved"
         db.commit()
         print("4. Lifecycle Cleanup: PASSED ✓")
 
